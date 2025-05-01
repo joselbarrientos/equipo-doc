@@ -1,0 +1,39 @@
+name: Next.js CI
+ 
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/README.md'
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - '**/README.md'
+ 
+jobs:
+  build:
+    if: github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.ref == 'develop'
+    runs-on: ubuntu-latest
+ 
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+ 
+    - name: Set up Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '18'
+ 
+    - name: Install dependencies
+      run: npm install
+ 
+    - name: Build project
+      run: npm run build
+ 
+    - name: Run tests
+      run: npm test
+ 
+    - name: Echo TEAM-DOC
+      run: echo TEAM-DOC
