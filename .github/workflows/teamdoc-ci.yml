@@ -1,0 +1,25 @@
+name: CI TEAM DOC
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v3
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Verificar formato de código (opcional)
+        run: npx eslint . || echo "Errores de formato ignorados"
+
+      - name: Probar aplicación (opcional)
+        run: echo "Aquí puedes agregar tus pruebas si tienes"
