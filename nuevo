@@ -1,0 +1,191 @@
+
+/**
+ * search.js - Documentation Search Module
+ * 
+ * This module provides advanced search functionality for the documentation system,
+ * allowing users to find content by keywords, tags, categories, and other metadata.
+ */
+
+// Dependencies
+const fs = require('fs');
+const path = require('path');
+const matter = require('gray-matter'); // For parsing frontmatter in markdown files
+
+/**
+ * Search class to handle all search-related functionality
+ */
+class DocumentationSearch {
+  constructor(options = {}) {
+    this.options = {
+      contentDir: options.contentDir || 'content',
+      indexPath: options.indexPath || 'search-index.json',
+      stopWords: options.stopWords || ['a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'with', 'to', 'for'],
+      ...options
+    };
+    
+    this.searchIndex = null;
+  }
+
+  /**
+   * Initialize the search module and build the search index if needed
+   */
+  async initialize() {
+    try {
+      // Try to load existing index
+      if (fs.existsSync(this.options.indexPath)) {
+        const indexData = fs.readFileSync(this.options.indexPath, 'utf8');
+        this.searchIndex = JSON.parse(indexData);
+        
+        // Check if index needs to be rebuilt based on last build time
+        const stats = fs.statSync(this.options.indexPath);
+        const lastBuildTime = new Date(stats.mtime);
+        const needsRebuild = this._checkIfRebuildNeeded(lastBuildTime);
+        
+        if (needsRebuild) {
+          console.log('Search index needs rebuilding...');
+          await this.buildSearchIndex();
+        }
+      } else {
+        // First time initialization - build index
+        await this.buildSearchIndex();
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Error initializing search module:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Build or rebuild the search index
+   */
+  async buildSearchIndex() {
+    try {
+      console.log('Building search index...');
+      const documents = await this._scanDocuments();
+      const index = this._createSearchIndex(documents);
+      
+      // Save index to file
+      fs.writeFileSync(this.options.indexPath, JSON.stringify(index, null, 2));
+      this.searchIndex = index;
+      console.log(Search index built successfully with ${Object.keys(index.documents).length} documents);
+      
+      return true;
+    } catch (error) {
+      console.error('Error building search index:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Search the documentation with the given query and options
+   * @param {string} query - The search query
+   * @param {object} options - Search options (filters, etc.)
+   * @returns {Array} - Search results sorted by relevance
+   */
+  search(query, options = {}) {
+    if (!this.searchIndex) {
+      throw new Error('Search index not initialized. Call initialize() first.');
+    }
+    
+    const searchOptions = {
+      limit: options.limit || 20,
+      minScore: options.minScore || 0.2,
+      filters: options.filters || {},
+      ...options
+    };
+    
+    // Process and normalize the query
+    const processedQuery = this._processQuery(query);
+    if (!processedQuery.length) {
+      return [];
+    }
+    
+    // Get matching documents
+    const results = this._findMatches(processedQuery, searchOptions);
+    
+    return results;
+  }
+
+  /**
+   * Get document suggestions based on a partial query
+   * @param {string} partial - Partial search query
+   * @param {number} limit - Maximum number of suggestions
+   * @returns {Array} - Suggested search terms
+   */
+  getSuggestions(partial, limit = 5) {
+    if (!this.searchIndex || !partial) {
+      return [];
+    }
+    
+    const normalizedPartial = partial.toLowerCase().trim();
+    if (normalizedPartial.length < 2) {
+      return [];
+    }
+    
+    // Find matching terms in the index
+    const suggestions = [];
+    for (const term in this.searchIndex.terms) {
+      if (term.startsWith(normalizedPartial) && suggestions.length < limit) {
+        suggestions.push(term);
+      }
+    }
+    
+    return suggestions;
+  }
+
+  /**
+   * Check if documents have been updated since the last index build
+   * @param {Date} lastBuildTime - Timestamp of the last index build
+   * @returns {boolean} - Whether the index needs to be rebuilt
+   */
+  _checkIfRebuildNeeded(lastBuildTime) {
+    // Check if any files in the content directory are newer than the index
+    const contentDir = this.options.contentDir;
+    
+    const checkDir = (dir) => {
+      const files = fs.readdirSync(dir);
+      
+      for (const file of files) {
+        const filePath = path.join(dir, file);
+        const stats = fs.statSync(filePath);
+        
+        if (stats.isDirectory()) {
+          const needsRebuild = checkDir(filePath);
+          if (needsRebuild) return true;
+        } else if (stats.mtime > lastBuildTime) {
+          return true;
+        }
+      }
+      
+      return false;
+    };
+    
+    return checkDir(contentDir);
+  }
+
+  /**
+   * Scan the content directory for documents to index
+   * @returns {Array} - Array of document objects
+   */
+  async _scanDocuments() {
+    const documents = [];
+    const contentDir = this.options.contentDir;
+    
+    const scanDir = (dir) => {
+      const files = fs.readdirSync(dir);
+      
+      for (const file of files) {
+        const filePath = path.join(dir, file);
+        const stats = fs.statSync(filePath);
+        
+        if (stats.isDirectory()) {
+          scanDir(filePath);
+        } else if (file.endsWith('.md') || file.endsWith('.mdx')) {
+          // Process markdown files
+          const fileContent = fs.readFileSync(filePath, 'utf8');
+          const { data, content } = matter(fileContent);
+          
+          // Create document object
+          const relativePath = path.relative(contentDir, filePath);
